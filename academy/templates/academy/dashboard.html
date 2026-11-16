@@ -1,0 +1,78 @@
+{% extends "academy/base.html" %}
+
+{% block title %}My Dashboard | CyberLearn{% endblock %}
+
+{% block content %}
+
+<h1>My Learning Dashboard</h1>
+
+<p class="muted">
+    Welcome back, {{ request.user.username }}.
+    Track your enrolled Learning Paths and progress.
+</p>
+
+<div class="grid">
+
+{% for item in dashboard_items %}
+
+    <div class="card">
+
+        <h2>{{ item.path.title }}</h2>
+
+        <p class="muted">
+            Enrolled: {{ item.enrolled_at|date:"d M Y" }}
+        </p>
+
+        <h3>{{ item.percent }}% Complete</h3>
+
+        <div style="background:#26364c;height:10px;border-radius:10px">
+            <div style="background:#38bdf8;height:10px;border-radius:10px;width:{{ item.percent }}%">
+            </div>
+        </div>
+
+        <p class="muted">
+            {{ item.completed_lessons }} of {{ item.total_lessons }} lessons completed
+        </p>
+
+        <h3>Lessons</h3>
+
+        {% for course in item.path.courses.all %}
+
+            <p><strong>{{ course.title }}</strong></p>
+
+            {% for lesson in course.lessons.all %}
+
+                {% if lesson.is_published %}
+
+                    <form method="post"
+                          action="{% url 'complete_lesson' lesson.id %}">
+                        {% csrf_token %}
+                        <span>{{ lesson.title }}</span>
+                        <button class="button" type="submit">
+                            Mark complete
+                        </button>
+                    </form>
+
+                {% endif %}
+
+            {% endfor %}
+
+        {% endfor %}
+
+    </div>
+
+{% empty %}
+
+    <div class="card">
+        <h2>No enrolments yet</h2>
+        <p>Choose a Learning Path to get started.</p>
+        <a class="button" href="{% url 'learning_paths' %}">
+            Browse Learning Paths
+        </a>
+    </div>
+
+{% endfor %}
+
+</div>
+
+{% endblock %}

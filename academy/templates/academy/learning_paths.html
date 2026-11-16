@@ -1,0 +1,51 @@
+{% extends "academy/base.html" %}
+
+{% block title %}Learning Paths | CyberLearn{% endblock %}
+
+{% block content %}
+
+<h1>CyberLearn Academy</h1>
+
+<p class="muted">
+    Develop practical cybersecurity skills through structured learning paths.
+</p>
+
+<div class="grid">
+
+{% for path in paths %}
+
+    <div class="card">
+
+        <h2>{{ path.title }}</h2>
+
+        <p class="muted">
+            {{ path.description }}
+        </p>
+
+        <p>
+            {{ path.courses.count }} courses
+        </p>
+
+        {% if path.id in enrolled_ids %}
+            <p>✓ Enrolled</p>
+        {% endif %}
+
+        <a class="button"
+           href="{% url 'learning_path_detail' path.id %}">
+            Explore Learning Path
+        </a>
+
+    </div>
+
+{% empty %}
+
+    <div class="card">
+        <h2>Learning Paths coming soon</h2>
+        <p>No published learning paths are available yet.</p>
+    </div>
+
+{% endfor %}
+
+</div>
+
+{% endblock %}

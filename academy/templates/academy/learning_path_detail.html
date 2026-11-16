@@ -1,0 +1,70 @@
+{% extends "academy/base.html" %}
+
+{% block title %}{{ path.title }} | CyberLearn{% endblock %}
+
+{% block content %}
+
+<p><a href="{% url 'learning_paths' %}">← All Learning Paths</a></p>
+
+<h1>{{ path.title }}</h1>
+
+<p class="muted">{{ path.description }}</p>
+
+{% if is_enrolled %}
+
+    <p>✓ You are enrolled in this Learning Path.</p>
+
+{% elif request.user.is_authenticated %}
+
+    <form method="post" action="{% url 'enroll_learning_path' path.id %}">
+        {% csrf_token %}
+        <button class="button" type="submit">
+            Enrol in Learning Path
+        </button>
+    </form>
+
+{% else %}
+
+    <a class="button" href="{% url 'student_login' %}">
+        Log in to enrol
+    </a>
+
+{% endif %}
+
+<h2 style="margin-top:40px">Courses and Lessons</h2>
+
+{% for course in path.courses.all %}
+
+    <div class="card">
+
+        <h2>{{ course.title }}</h2>
+
+        <p>{{ course.description }}</p>
+
+        <p class="muted">
+            Level: {{ course.get_level_display }}
+        </p>
+
+        {% for lesson in course.lessons.all %}
+
+            {% if lesson.is_published %}
+
+                <p>📘 {{ lesson.title }}</p>
+
+            {% endif %}
+
+        {% empty %}
+
+            <p class="muted">Lessons coming soon.</p>
+
+        {% endfor %}
+
+    </div>
+
+{% empty %}
+
+    <p>No courses have been added to this Learning Path yet.</p>
+
+{% endfor %}
+
+{% endblock %}

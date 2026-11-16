@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# Django
+db.sqlite3
+db.sqlite3-*
+staticfiles/
+media/
+*.log
+
+# Secrets and certificates
+*.pem
+*.key
+id_rsa*
+*.p12
+*.pfx
+
+# Local/editor files
+.vscode/
+.idea/
+.DS_Store
