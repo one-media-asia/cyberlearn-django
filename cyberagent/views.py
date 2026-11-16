@@ -9,10 +9,8 @@ from django.views.decorators.http import require_POST
 from .auth import authenticated_supabase_user
 from .models import TrialUsage
 
-
 TOKEN_SALT = "cyberagent.trial.v1"
 TOKEN_MAX_AGE = 60 * 60 * 24 * 30
-
 
 
 def account_usage(user_id):
@@ -23,52 +21,60 @@ def account_usage(user_id):
     return usage
 
 
+def guest_usage(token):
+    try:
+        payload = signing.loads(token, salt=TOKEN_SALT, max_age=TOKEN_MAX_AGE)
+        visitor_id = payload["visitor_id"]
+        if not isinstance(visitor_id, str):
+            return None
+        return TrialUsage.objects.filter(
+            session_key=visitor_id,
+            supabase_user_id__isnull=True,
+        ).first()
+    except (signing.BadSignature, KeyError, TypeError):
+        return None
+
+
 @csrf_exempt
 @require_POST
 def trial_start(request):
-    try:
-        user_id = authenticated_supabase_user(request)
-    except ValueError as exc:
-        return JsonResponse({"error": str(exc)}, status=401)
-    except RuntimeError as exc:
-        return JsonResponse({"error": str(exc)}, status=503)
-
     try:
         data = json.loads(request.body or b"{}")
     except (json.JSONDecodeError, UnicodeDecodeError):
         return JsonResponse({"error": "Invalid JSON."}, status=400)
 
-    # Migrate a previously issued paid browser token to this verified account.
-    # Unpaid anonymous records are never attached to an account.
-    legacy_token = data.get("token", "")
-    if isinstance(legacy_token, str) and legacy_token:
+    authorization = request.headers.get("Authorization", "")
+
+    if authorization.startswith("Bearer "):
         try:
-            payload = signing.loads(
-                legacy_token,
-                salt=TOKEN_SALT,
-                max_age=TOKEN_MAX_AGE,
-            )
-            legacy_usage = TrialUsage.objects.filter(
-                session_key=payload["visitor_id"],
-                paid_access=True,
-            ).first()
-        except (signing.BadSignature, KeyError, TypeError):
-            legacy_usage = None
+            user_id = authenticated_supabase_user(request)
+        except ValueError as exc:
+            return JsonResponse({"error": str(exc)}, status=401)
+        except RuntimeError as exc:
+            return JsonResponse({"error": str(exc)}, status=503)
 
-        if legacy_usage is not None:
-            existing = TrialUsage.objects.filter(supabase_user_id=user_id).first()
-            if existing is None and legacy_usage.supabase_user_id is None:
-                legacy_usage.supabase_user_id = user_id
-                legacy_usage.save(update_fields=["supabase_user_id", "updated_at"])
-            elif existing is not None and not existing.paid_access:
-                existing.paid_access = True
-                existing.save(update_fields=["paid_access", "updated_at"])
+        usage = account_usage(user_id)
+        return JsonResponse({
+            "prompts_used": usage.prompts_used,
+            "prompts_remaining": None,
+            "paid_access": True,
+        })
 
-    usage = account_usage(user_id)
-    remaining = None if usage.paid_access else max(0, 3 - usage.prompts_used)
+    token = data.get("token", "")
+    if token:
+        if not isinstance(token, str):
+            return JsonResponse({"error": "Invalid guest trial token."}, status=400)
+        usage = guest_usage(token)
+        if usage is None:
+            return JsonResponse({"error": "Guest trial token expired or invalid."}, status=401)
+    else:
+        visitor_id = uuid.uuid4().hex
+        usage = TrialUsage.objects.create(session_key=visitor_id)
+        token = signing.dumps({"visitor_id": visitor_id}, salt=TOKEN_SALT)
 
     return JsonResponse({
+        "token": token,
         "prompts_used": usage.prompts_used,
-        "prompts_remaining": remaining,
-        "paid_access": usage.paid_access,
+        "prompts_remaining": max(0, 3 - usage.prompts_used),
+        "paid_access": False,
     })

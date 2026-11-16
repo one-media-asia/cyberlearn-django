@@ -1,10 +1,10 @@
-
 import json
 import logging
 import os
 import urllib.request
 import uuid
 
+from django.core import signing
 from django.db.models import F
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -12,6 +12,7 @@ from django.views.decorators.http import require_POST
 
 from .auth import authenticated_supabase_user
 from .models import TrialUsage
+from .views import TOKEN_MAX_AGE, TOKEN_SALT
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,6 @@ QWEN_API_URL = os.environ.get(
     "QWEN_API_URL",
     "https://ws-tirwz9lb10m6kwaw.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1/chat/completions",
 )
-
 QWEN_MODEL = os.environ.get("QWEN_MODEL", "qwen3.8-27b")
 QWEN_API_KEY = os.environ.get("QWEN_API_KEY", "").strip()
 
@@ -36,12 +36,45 @@ Keep answers focused and easy to understand.
 @csrf_exempt
 @require_POST
 def chat(request):
-    try:
-        user_id = authenticated_supabase_user(request)
-    except ValueError as exc:
-        return JsonResponse({"error": str(exc)}, status=401)
-    except RuntimeError as exc:
-        return JsonResponse({"error": str(exc)}, status=503)
+    authorization = request.headers.get("Authorization", "")
+    is_student = authorization.startswith("Bearer ")
+    usage = None
+
+    if is_student:
+        try:
+            user_id = authenticated_supabase_user(request)
+        except ValueError as exc:
+            return JsonResponse({"error": str(exc)}, status=401)
+        except RuntimeError as exc:
+            return JsonResponse({"error": str(exc)}, status=503)
+
+        usage, _ = TrialUsage.objects.get_or_create(
+            supabase_user_id=user_id,
+            defaults={"session_key": uuid.uuid4().hex},
+        )
+    else:
+        token = request.headers.get("X-Josh-Trial-Token", "")
+        try:
+            payload = signing.loads(
+                token,
+                salt=TOKEN_SALT,
+                max_age=TOKEN_MAX_AGE,
+            )
+            visitor_id = payload["visitor_id"]
+            if not isinstance(visitor_id, str):
+                raise ValueError("Invalid guest token.")
+            usage = TrialUsage.objects.filter(
+                session_key=visitor_id,
+                supabase_user_id__isnull=True,
+            ).first()
+        except (signing.BadSignature, KeyError, TypeError, ValueError):
+            usage = None
+
+        if usage is None:
+            return JsonResponse(
+                {"error": "Your guest trial has expired. Please refresh Josh."},
+                status=401,
+            )
 
     try:
         data = json.loads(request.body or b"{}")
@@ -59,28 +92,20 @@ def chat(request):
             status=400,
         )
 
-    usage, _ = TrialUsage.objects.get_or_create(
-        supabase_user_id=user_id,
-        defaults={"session_key": uuid.uuid4().hex},
-    )
-
-    if not usage.paid_access:
+    if not is_student:
         updated = TrialUsage.objects.filter(
             pk=usage.pk,
             prompts_used__lt=3,
-            paid_access=False,
         ).update(prompts_used=F("prompts_used") + 1)
 
         if updated == 0:
-            usage.refresh_from_db()
-            if not usage.paid_access:
-                return JsonResponse(
-                    {
-                        "error": "Your 3 free Josh prompts have been used.",
-                        "prompts_remaining": 0,
-                    },
-                    status=429,
-                )
+            return JsonResponse(
+                {
+                    "error": "Your 3 free Josh prompts have been used.",
+                    "prompts_remaining": 0,
+                },
+                status=429,
+            )
 
     try:
         if not QWEN_API_KEY:
@@ -111,14 +136,13 @@ def chat(request):
             result = json.loads(response.read().decode("utf-8"))
 
         answer = result["choices"][0]["message"]["content"]
-
         if not isinstance(answer, str) or not answer.strip():
             raise RuntimeError("Qwen returned an empty response.")
 
     except Exception:
         logger.exception("Josh Qwen request failed")
 
-        if not usage.paid_access:
+        if not is_student:
             TrialUsage.objects.filter(
                 pk=usage.pk,
                 prompts_used__gt=0,
@@ -129,12 +153,15 @@ def chat(request):
             status=502,
         )
 
-    usage.refresh_from_db()
+    if is_student:
+        return JsonResponse({
+            "reply": answer,
+            "prompts_remaining": None,
+        })
 
+    usage.refresh_from_db()
     return JsonResponse({
         "reply": answer,
         "prompts_used": usage.prompts_used,
-        "prompts_remaining": (
-            None if usage.paid_access else max(0, 3 - usage.prompts_used)
-        ),
+        "prompts_remaining": max(0, 3 - usage.prompts_used),
     })
