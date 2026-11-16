@@ -94,7 +94,7 @@ class DonationManagementTests(TestCase):
         send_mail_mock.assert_called_once()
         args, kwargs = send_mail_mock.call_args
         self.assertEqual(kwargs["recipient_list"], ["donor@example.test"])
-        self.assertIn("https://cyberlearn.onemedia.asia/donate/manage?token=", args[1])
+        self.assertIn("https://cyberlearn.onemedia.asia/donate/manage?token=", kwargs["message"])
 
     def test_checkout_rejects_amount_below_minimum(self):
         response = self.client.post(
