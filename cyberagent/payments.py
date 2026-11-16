@@ -1,7 +1,5 @@
 import json
 import logging
-import secrets
-import string
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 import stripe
@@ -130,9 +128,6 @@ def create_donation_checkout(request):
             "cancel_url": f"{frontend_url}/donate?cancelled=1",
             "client_reference_id": str(donation.id),
             "metadata": {"donation_id": str(donation.id), "purpose": "cyberlearn_support"},
-            "integration_identifier": "cyberlearn_donation_" + "".join(
-                secrets.choice(string.ascii_lowercase) for _ in range(8)
-            ),
         }
         if donor_email:
             params["customer_email"] = donor_email
