@@ -106,6 +106,8 @@ def create_donation_checkout(request):
         price_data = {
             "currency": "eur",
             "unit_amount": int(amount * 100),
+            # Donor-entered amount is the tax-inclusive total.
+            "tax_behavior": "inclusive",
             "product_data": {
                 "name": product_name,
                 "description": "Voluntary support for CyberLearn cybersecurity education.",
@@ -113,6 +115,9 @@ def create_donation_checkout(request):
         }
         params = {
             "mode": "subscription" if interval == "month" else "payment",
+            # Stripe Tax calculates applicable tax; inclusive pricing keeps the
+            # displayed Checkout total at the amount selected by the donor.
+            "automatic_tax": {"enabled": True},
             "line_items": [{
                 "price_data": (
                     {**price_data, "recurring": {"interval": "month"}}
