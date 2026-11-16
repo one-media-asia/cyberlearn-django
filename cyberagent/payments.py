@@ -4,7 +4,9 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 import stripe
 from django.conf import settings
+from django.core import signing
 from django.core.cache import cache
+from django.core.mail import send_mail
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.db import transaction
@@ -162,6 +164,101 @@ def create_donation_checkout(request):
         )
 
 
+
+def _send_subscription_management_email(donation_id):
+    """Email a short-lived, signed link that can open this donor's Stripe portal."""
+    try:
+        donation = Donation.objects.get(pk=donation_id)
+        if (
+            donation.interval != Donation.Interval.MONTH
+            or donation.status not in (Donation.Status.ACTIVE, Donation.Status.PAST_DUE)
+            or not donation.donor_email
+            or not donation.stripe_customer_id
+            or not donation.stripe_subscription_id
+        ):
+            return
+
+        token = signing.dumps(
+            {"donation_id": str(donation.pk), "email": donation.donor_email},
+            salt="cyberlearn.donation.portal.v1",
+        )
+        frontend_url = getattr(settings, "DONATION_FRONTEND_URL", "").rstrip("/")
+        manage_url = f"{frontend_url}/donate/manage?token={token}"
+        send_mail(
+            subject="Manage your CyberLearn monthly support",
+            message=(
+                "Thank you for supporting CyberLearn.\n\n"
+                "Use this secure link to manage or cancel your monthly donation:\n"
+                f"{manage_url}\n\n"
+                "For your security, this link expires after 7 days. "
+                "If it expires, contact CyberLearn to request a new link.\n"
+            ),
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[donation.donor_email],
+            fail_silently=False,
+        )
+    except Exception:
+        logger.exception("Unable to send monthly donation management email for %s", donation_id)
+
+
+@csrf_exempt
+@require_POST
+def create_donation_portal_session(request):
+    try:
+        data = json.loads(request.body or b"{}")
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"error": "Invalid request body."}, status=400)
+
+    token = data.get("token", "") if isinstance(data, dict) else ""
+    if not isinstance(token, str) or not token:
+        return JsonResponse({"error": "A valid management link is required."}, status=400)
+
+    try:
+        payload = signing.loads(
+            token,
+            salt="cyberlearn.donation.portal.v1",
+            max_age=7 * 24 * 60 * 60,
+        )
+    except signing.BadSignature:
+        return JsonResponse(
+            {"error": "This management link is invalid or has expired. Please request a new one."},
+            status=400,
+        )
+
+    donation_id = payload.get("donation_id") if isinstance(payload, dict) else None
+    email = payload.get("email") if isinstance(payload, dict) else None
+    donation = Donation.objects.filter(
+        pk=donation_id,
+        donor_email=email,
+        interval=Donation.Interval.MONTH,
+        status__in=(Donation.Status.ACTIVE, Donation.Status.PAST_DUE),
+    ).exclude(stripe_customer_id="").exclude(stripe_subscription_id="").first()
+
+    if not donation:
+        return JsonResponse(
+            {"error": "No active monthly donation was found for this link."},
+            status=404,
+        )
+
+    frontend_url = getattr(settings, "DONATION_FRONTEND_URL", "").rstrip("/")
+    try:
+        params = {
+            "customer": donation.stripe_customer_id,
+            "return_url": f"{frontend_url}/donate",
+        }
+        portal_configuration = getattr(settings, "STRIPE_BILLING_PORTAL_CONFIGURATION", "")
+        if portal_configuration:
+            params["configuration"] = portal_configuration
+        session = _stripe_client().v1.billing_portal.sessions.create(params)
+        return JsonResponse({"portal_url": session.url})
+    except Exception:
+        logger.exception("Unable to create Stripe Billing Portal session for donation %s", donation.pk)
+        return JsonResponse(
+            {"error": "We could not open donation management. Please try again later."},
+            status=502,
+        )
+
+
 def _complete_checkout(session):
     if not _checkout_session_paid(session):
         return
@@ -188,6 +285,10 @@ def _complete_checkout(session):
     donation.donor_name = details.get("name") or donation.donor_name
     donation.paid_at = donation.paid_at or timezone.now()
     donation.save()
+    if donation.interval == Donation.Interval.MONTH:
+        transaction.on_commit(
+            lambda donation_id=donation.pk: _send_subscription_management_email(donation_id)
+        )
 
 
 def _subscription_id_from_invoice(invoice):
