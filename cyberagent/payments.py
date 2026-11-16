@@ -260,8 +260,6 @@ def create_donation_portal_session(request):
 
 
 def _complete_checkout(session):
-    if not _checkout_session_paid(session):
-        return
     donation_id = (session.get("metadata") or {}).get("donation_id")
     if not donation_id:
         return
@@ -272,20 +270,23 @@ def _complete_checkout(session):
         return
 
     details = session.get("customer_details") or {}
-    donation.status = (
-        Donation.Status.ACTIVE
-        if donation.interval == Donation.Interval.MONTH
-        else Donation.Status.PAID
-    )
+    is_paid = _checkout_session_paid(session)
+    if is_paid:
+        donation.status = (
+            Donation.Status.ACTIVE
+            if donation.interval == Donation.Interval.MONTH
+            else Donation.Status.PAID
+        )
     donation.stripe_customer_id = session.get("customer") or donation.stripe_customer_id
     donation.stripe_payment_intent_id = session.get("payment_intent") or donation.stripe_payment_intent_id
     donation.stripe_subscription_id = session.get("subscription") or donation.stripe_subscription_id
     donation.stripe_invoice_id = session.get("invoice") or donation.stripe_invoice_id
     donation.donor_email = details.get("email") or donation.donor_email
     donation.donor_name = details.get("name") or donation.donor_name
-    donation.paid_at = donation.paid_at or timezone.now()
+    if is_paid:
+        donation.paid_at = donation.paid_at or timezone.now()
     donation.save()
-    if donation.interval == Donation.Interval.MONTH:
+    if is_paid and donation.interval == Donation.Interval.MONTH:
         transaction.on_commit(
             lambda donation_id=donation.pk: _send_subscription_management_email(donation_id)
         )
@@ -332,10 +333,17 @@ def stripe_webhook(request):
             elif event_type == "invoice.paid":
                 subscription_id = _subscription_id_from_invoice(obj)
                 if subscription_id:
-                    Donation.objects.filter(stripe_subscription_id=subscription_id).update(
+                    donations = Donation.objects.filter(stripe_subscription_id=subscription_id)
+                    donation_ids = list(donations.values_list("pk", flat=True))
+                    donations.update(
                         status=Donation.Status.ACTIVE,
                         stripe_invoice_id=obj.get("id", ""),
+                        paid_at=timezone.now(),
                     )
+                    for donation_id in donation_ids:
+                        transaction.on_commit(
+                            lambda donation_id=donation_id: _send_subscription_management_email(donation_id)
+                        )
             elif event_type == "invoice.payment_failed":
                 subscription_id = _subscription_id_from_invoice(obj)
                 if subscription_id:
