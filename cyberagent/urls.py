@@ -8,4 +8,5 @@ urlpatterns = [
     path("relay/", relay.chat, name="cyberagent_relay"),
     path("donations/checkout/", payments.create_donation_checkout, name="donation_checkout"),
     path("donations/webhook/", payments.stripe_webhook, name="stripe_donation_webhook"),
+    path("donations/portal/", payments.create_donation_portal_session, name="donation_portal_session"),
 ]
