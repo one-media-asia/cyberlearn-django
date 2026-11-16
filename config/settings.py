@@ -168,3 +168,12 @@ SESSION_COOKIE_SAMESITE = "Lax"
 
 CSRF_COOKIE_SECURE = True
 CSRF_COOKIE_SAMESITE = "Lax"
+
+
+# Stripe donations. Secret values are supplied by the server environment only.
+STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+DONATION_FRONTEND_URL = os.environ.get(
+    "DONATION_FRONTEND_URL",
+    "https://cyberlearn.onemedia.asia",
+)
