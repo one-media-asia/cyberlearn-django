@@ -334,7 +334,6 @@ def stripe_webhook(request):
                 subscription_id = _subscription_id_from_invoice(obj)
                 if subscription_id:
                     donations = Donation.objects.filter(stripe_subscription_id=subscription_id)
-                    donation_ids = list(donations.values_list("pk", flat=True))
                     donations.update(
                         status=Donation.Status.ACTIVE,
                         stripe_invoice_id=obj.get("id", ""),
