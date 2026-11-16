@@ -263,34 +263,3 @@ def stripe_webhook(request):
 
     return JsonResponse({"received": True})
 
-
-@csrf_exempt
-@require_POST
-def create_billing_portal(request):
-    try:
-        data = json.loads(request.body or b"{}")
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return JsonResponse({"error": "Invalid request body."}, status=400)
-
-    session_id = str(data.get("session_id", "")).strip() if isinstance(data, dict) else ""
-    if not session_id.startswith("cs_"):
-        return JsonResponse({"error": "A valid Checkout Session is required."}, status=400)
-
-    frontend_url = getattr(settings, "DONATION_FRONTEND_URL", "").rstrip("/")
-    try:
-        client = _stripe_client()
-        checkout = client.v1.checkout.sessions.retrieve(session_id)
-        customer_id = checkout.customer
-        if not customer_id or checkout.payment_status != "paid":
-            return JsonResponse({"error": "A completed donation is required."}, status=403)
-        portal = client.v1.billing_portal.sessions.create({
-            "customer": customer_id,
-            "return_url": f"{frontend_url}/donate/success?session_id={session_id}",
-        })
-        return JsonResponse({"portal_url": portal.url})
-    except Exception:
-        logger.exception("Unable to create Stripe Billing Portal for Checkout Session")
-        return JsonResponse(
-            {"error": "The billing portal is not available yet. Please contact CyberLearn for help."},
-            status=503,
-        )
