@@ -340,10 +340,6 @@ def stripe_webhook(request):
                         stripe_invoice_id=obj.get("id", ""),
                         paid_at=timezone.now(),
                     )
-                    for donation_id in donation_ids:
-                        transaction.on_commit(
-                            lambda donation_id=donation_id: _send_subscription_management_email(donation_id)
-                        )
             elif event_type == "invoice.payment_failed":
                 subscription_id = _subscription_id_from_invoice(obj)
                 if subscription_id:
