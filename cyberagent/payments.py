@@ -15,7 +15,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
-from .models import Donation, DonationPayment, StripeWebhookEvent
+from .models import Donation, DonationPayment, DonationSettings, StripeWebhookEvent
 
 logger = logging.getLogger(__name__)
 
@@ -185,9 +185,25 @@ def _record_donation_payment(*, donation, amount_minor, currency, payment_intent
 
 
 @require_GET
+def donation_settings(request):
+    """Public, non-sensitive donation form settings."""
+    settings_row = DonationSettings.objects.filter(pk=1).first()
+    target = settings_row.fundraising_target if settings_row else Decimal("500.00")
+    currency = settings_row.currency if settings_row else "eur"
+    return JsonResponse({
+        "minimum_amount": "1.00",
+        "maximum_amount": "10000.00",
+        "suggested_amounts": ["5.00", "10.00", "20.00", "50.00"],
+        "fundraising_target": f"{target:.2f}",
+        "currency": currency,
+    })
+
+
+@require_GET
 def donation_stats(request):
     """Public totals for donations made through the CyberLearn Stripe Checkout form only."""
-    target = Decimal("500.00")
+    settings_row = DonationSettings.objects.filter(pk=1).first()
+    target = settings_row.fundraising_target if settings_row else Decimal("500.00")
     raised = Decimal("0.00")
     supporters = set()
     for payment in DonationPayment.objects.filter(currency="eur").select_related("donation"):
@@ -204,7 +220,7 @@ def donation_stats(request):
         "remaining": f"{remaining:.2f}",
         "supporters": len(supporters),
         "percentage": percentage,
-        "currency": "EUR",
+        "currency": (settings_row.currency if settings_row else "eur").upper(),
     })
 
 
