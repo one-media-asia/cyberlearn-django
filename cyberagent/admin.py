@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Donation, DonationPayment, StripeWebhookEvent, TrialUsage
+from .models import Donation, DonationPayment, DonationSettings, StripeWebhookEvent, TrialUsage
 
 
 @admin.register(TrialUsage)
@@ -41,3 +41,15 @@ class DonationPaymentAdmin(admin.ModelAdmin):
         "stripe_payment_intent_id", "created_at",
     )
     readonly_fields = ("created_at",)
+
+
+@admin.register(DonationSettings)
+class DonationSettingsAdmin(admin.ModelAdmin):
+    list_display = ("fundraising_target", "currency")
+    fields = ("fundraising_target", "currency")
+
+    def has_add_permission(self, request):
+        return not DonationSettings.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
