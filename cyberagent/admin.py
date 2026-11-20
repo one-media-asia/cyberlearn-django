@@ -30,13 +30,14 @@ class StripeWebhookEventAdmin(admin.ModelAdmin):
     readonly_fields = ("stripe_event_id", "event_type", "processed_at")
 
 
-
 @admin.register(DonationPayment)
 class DonationPaymentAdmin(admin.ModelAdmin):
     list_display = ("created_at", "donation", "amount", "refunded_amount", "currency")
+    list_filter = ("currency", "created_at")
     search_fields = ("stripe_invoice_id", "stripe_checkout_session_id", "stripe_payment_intent_id")
-    readonly_fields = (
+    fields = (
         "donation", "amount", "refunded_amount", "currency",
         "stripe_invoice_id", "stripe_checkout_session_id",
         "stripe_payment_intent_id", "created_at",
     )
+    readonly_fields = ("created_at",)
