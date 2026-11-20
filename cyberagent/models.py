@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 
 from django.db import models
 
@@ -82,3 +83,16 @@ class DonationPayment(models.Model):
 
     def __str__(self):
         return f"{self.currency.upper()} {self.amount} — donation {self.donation_id}"
+
+
+class DonationSettings(models.Model):
+    """Public fundraising configuration managed in Django admin."""
+    fundraising_target = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("500.00"))
+    currency = models.CharField(max_length=3, default="eur")
+
+    class Meta:
+        verbose_name = "Donation settings"
+        verbose_name_plural = "Donation settings"
+
+    def __str__(self):
+        return f"Fundraising goal: {self.currency.upper()} {self.fundraising_target}"
