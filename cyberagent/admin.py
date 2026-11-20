@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Donation, StripeWebhookEvent, TrialUsage
+from .models import Donation, DonationPayment, StripeWebhookEvent, TrialUsage
 
 
 @admin.register(TrialUsage)
@@ -28,3 +28,15 @@ class StripeWebhookEventAdmin(admin.ModelAdmin):
     list_display = ("stripe_event_id", "event_type", "processed_at")
     search_fields = ("stripe_event_id", "event_type")
     readonly_fields = ("stripe_event_id", "event_type", "processed_at")
+
+
+
+@admin.register(DonationPayment)
+class DonationPaymentAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "donation", "amount", "refunded_amount", "currency")
+    search_fields = ("stripe_invoice_id", "stripe_checkout_session_id", "stripe_payment_intent_id")
+    readonly_fields = (
+        "donation", "amount", "refunded_amount", "currency",
+        "stripe_invoice_id", "stripe_checkout_session_id",
+        "stripe_payment_intent_id", "created_at",
+    )
