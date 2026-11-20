@@ -13,9 +13,9 @@ from django.db import transaction
 from django.http import JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
-from .models import Donation, StripeWebhookEvent
+from .models import Donation, DonationPayment, StripeWebhookEvent
 
 logger = logging.getLogger(__name__)
 
@@ -165,6 +165,49 @@ def create_donation_checkout(request):
 
 
 
+def _record_donation_payment(*, donation, amount_minor, currency, payment_intent="", checkout_session="", invoice=""):
+    """Persist one successful Stripe payment; provider IDs make webhook retries safe."""
+    if not donation or not amount_minor or int(amount_minor) <= 0:
+        return
+    amount = (Decimal(int(amount_minor)) / Decimal("100")).quantize(Decimal("0.01"))
+    defaults = {
+        "donation": donation,
+        "amount": amount,
+        "currency": (currency or donation.currency or "eur").lower(),
+        "stripe_payment_intent_id": payment_intent or "",
+    }
+    if invoice:
+        DonationPayment.objects.get_or_create(stripe_invoice_id=invoice, defaults=defaults)
+    elif checkout_session:
+        DonationPayment.objects.get_or_create(
+            stripe_checkout_session_id=checkout_session, defaults=defaults
+        )
+
+
+@require_GET
+def donation_stats(request):
+    """Public totals for donations made through the CyberLearn Stripe Checkout form only."""
+    target = Decimal("500.00")
+    raised = Decimal("0.00")
+    supporters = set()
+    for payment in DonationPayment.objects.filter(currency="eur").select_related("donation"):
+        net = max(payment.amount - payment.refunded_amount, Decimal("0.00"))
+        if net > 0:
+            raised += net
+            supporters.add(payment.donation_id)
+    raised = raised.quantize(Decimal("0.01"))
+    remaining = max(target - raised, Decimal("0.00"))
+    percentage = min(int((raised / target) * 100), 100) if target else 0
+    return JsonResponse({
+        "raised": f"{raised:.2f}",
+        "target": f"{target:.2f}",
+        "remaining": f"{remaining:.2f}",
+        "supporters": len(supporters),
+        "percentage": percentage,
+        "currency": "EUR",
+    })
+
+
 def _send_subscription_management_email(donation_id):
     """Email a short-lived, signed link that can open this donor's Stripe portal."""
     try:
@@ -277,6 +320,14 @@ def _complete_checkout(session):
             if donation.interval == Donation.Interval.MONTH
             else Donation.Status.PAID
         )
+        if donation.interval == Donation.Interval.ONCE and session.get("mode") == "payment":
+            _record_donation_payment(
+                donation=donation,
+                amount_minor=session.get("amount_total"),
+                currency=session.get("currency"),
+                payment_intent=session.get("payment_intent") or "",
+                checkout_session=session.get("id") or "",
+            )
     donation.stripe_customer_id = session.get("customer") or donation.stripe_customer_id
     donation.stripe_payment_intent_id = session.get("payment_intent") or donation.stripe_payment_intent_id
     donation.stripe_subscription_id = session.get("subscription") or donation.stripe_subscription_id
@@ -339,6 +390,14 @@ def stripe_webhook(request):
                         stripe_invoice_id=obj.get("id", ""),
                         paid_at=timezone.now(),
                     )
+                    for donation in donations:
+                        _record_donation_payment(
+                            donation=donation,
+                            amount_minor=obj.get("amount_paid"),
+                            currency=obj.get("currency"),
+                            payment_intent=obj.get("payment_intent") or "",
+                            invoice=obj.get("id") or "",
+                        )
             elif event_type == "invoice.payment_failed":
                 subscription_id = _subscription_id_from_invoice(obj)
                 if subscription_id:
@@ -353,8 +412,16 @@ def stripe_webhook(request):
             elif event_type == "charge.refunded":
                 payment_intent = obj.get("payment_intent")
                 if payment_intent:
-                    Donation.objects.filter(stripe_payment_intent_id=payment_intent).update(
-                        status=Donation.Status.REFUNDED
+                    if obj.get("refunded"):
+                        Donation.objects.filter(stripe_payment_intent_id=payment_intent).update(
+                            status=Donation.Status.REFUNDED
+                        )
+                    DonationPayment.objects.filter(
+                        stripe_payment_intent_id=payment_intent
+                    ).update(
+                        refunded_amount=(
+                            Decimal(str(obj.get("amount_refunded", 0))) / Decimal("100")
+                        ).quantize(Decimal("0.01"))
                     )
 
             StripeWebhookEvent.objects.create(
