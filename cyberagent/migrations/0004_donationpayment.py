@@ -2,6 +2,27 @@ import django.db.models.deletion
 from django.db import migrations, models
 
 
+def backfill_existing_payments(apps, schema_editor):
+    Donation = apps.get_model("cyberagent", "Donation")
+    DonationPayment = apps.get_model("cyberagent", "DonationPayment")
+    for donation in Donation.objects.filter(status__in=("paid", "active")):
+        fields = {
+            "donation": donation,
+            "amount": donation.amount,
+            "currency": donation.currency,
+            "stripe_payment_intent_id": donation.stripe_payment_intent_id or "",
+        }
+        if donation.stripe_invoice_id:
+            DonationPayment.objects.get_or_create(
+                stripe_invoice_id=donation.stripe_invoice_id, defaults=fields
+            )
+        elif donation.stripe_checkout_session_id:
+            DonationPayment.objects.get_or_create(
+                stripe_checkout_session_id=donation.stripe_checkout_session_id,
+                defaults=fields,
+            )
+
+
 class Migration(migrations.Migration):
     dependencies = [
         ("cyberagent", "0003_donation_stripewebhookevent"),
@@ -23,4 +44,5 @@ class Migration(migrations.Migration):
             ],
             options={"ordering": ("-created_at",)},
         ),
+        migrations.RunPython(backfill_existing_payments, migrations.RunPython.noop),
     ]
