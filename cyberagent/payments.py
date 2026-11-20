@@ -413,9 +413,10 @@ def stripe_webhook(request):
                 payment_intent = obj.get("payment_intent")
                 if payment_intent:
                     if obj.get("refunded"):
-                        Donation.objects.filter(stripe_payment_intent_id=payment_intent).update(
-                            status=Donation.Status.REFUNDED
-                        )
+                        Donation.objects.filter(
+                            stripe_payment_intent_id=payment_intent,
+                            interval=Donation.Interval.ONCE,
+                        ).update(status=Donation.Status.REFUNDED)
                     DonationPayment.objects.filter(
                         stripe_payment_intent_id=payment_intent
                     ).update(
