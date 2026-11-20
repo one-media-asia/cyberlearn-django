@@ -63,3 +63,22 @@ class StripeWebhookEvent(models.Model):
 
     def __str__(self):
         return f"{self.event_type} ({self.stripe_event_id})"
+
+
+
+class DonationPayment(models.Model):
+    """A single settled payment from a Donation Checkout or subscription invoice."""
+    donation = models.ForeignKey(Donation, on_delete=models.PROTECT, related_name="payments")
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    refunded_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    currency = models.CharField(max_length=3, default="eur")
+    stripe_invoice_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
+    stripe_checkout_session_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
+    stripe_payment_intent_id = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.currency.upper()} {self.amount} — donation {self.donation_id}"
