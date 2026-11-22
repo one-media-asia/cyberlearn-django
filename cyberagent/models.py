@@ -41,6 +41,15 @@ class Donation(models.Model):
     donor_name = models.CharField(max_length=120, blank=True)
     donor_email = models.EmailField(blank=True)
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.PENDING)
+
+    class PaymentMethod(models.TextChoices):
+        STRIPE = "stripe", "Stripe"
+        REVOLUT_LINK = "revolut_link", "Revolut.me"
+        REVOLUT_TRANSFER = "revolut_transfer", "Revolut bank transfer"
+        BANK_TRANSFER = "bank_transfer", "Other bank transfer"
+
+    payment_method = models.CharField(max_length=20, choices=PaymentMethod.choices, default=PaymentMethod.STRIPE)
+    manual_reference = models.CharField(max_length=120, unique=True, null=True, blank=True)
     stripe_checkout_session_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
     stripe_customer_id = models.CharField(max_length=255, blank=True)
     stripe_payment_intent_id = models.CharField(max_length=255, blank=True)
